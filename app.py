@@ -25,7 +25,12 @@ RAILWAY_API_KEY = os.environ.get("RAILWAY_API_KEY") # API Key for securing this 
 # --- Basic Configuration Validation ---
 if not ASSEMBLYAI_API_KEY:
     print("CRITICAL WARNING: ASSEMBLYAI_API_KEY environment variable not set. Transcription will fail.")
-if not GEMINI_API_KEY:
+if GEMINI_API_KEY:
+    if "\n" in GEMINI_API_KEY or "\r" in GEMINI_API_KEY or " " in GEMINI_API_KEY:
+        print(f"CRITICAL WARNING: GEMINI_API_KEY Invalid Metadata : {repr(GEMINI_API_KEY)}")
+    else:
+        print(f"GEMINI_API_KEY is not loaded correctly: {GEMINI_API_KEY[:6]}...")
+else:
     print("CRITICAL WARNING: GEMINI_API_KEY environment variable not set. LLM processing will fail.")
 if not RAILWAY_API_KEY:
     print("CRITICAL WARNING: RAILWAY_API_KEY environment variable not set. The API will be inaccessible or insecure.")
