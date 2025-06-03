@@ -482,6 +482,7 @@ def api_process_instagram_posts():
     results = []
     for idx, url in enumerate(instagram_urls):
         log(f"--- Processing URL {idx + 1}/{len(instagram_urls)}: {url} ---")
+        time.sleep(2)
         result = process_instagram_post_logic(url)
         results.append({
             "url": url,
