@@ -29,7 +29,7 @@ if GEMINI_API_KEY:
     if "\n" in GEMINI_API_KEY or "\r" in GEMINI_API_KEY or " " in GEMINI_API_KEY:
         print(f"CRITICAL WARNING: GEMINI_API_KEY Invalid Metadata : {repr(GEMINI_API_KEY)}")
     else:
-        print(f"GEMINI_API_KEY is not loaded correctly: {GEMINI_API_KEY[:6]}...")
+        print(f"GEMINI_API_KEY is loaded correctly: {GEMINI_API_KEY[:6]}...")
 else:
     print("CRITICAL WARNING: GEMINI_API_KEY environment variable not set. LLM processing will fail.")
 if not RAILWAY_API_KEY:
