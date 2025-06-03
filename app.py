@@ -465,6 +465,39 @@ def api_process_instagram_post():
         log(f"FATAL: Unhandled exception in API endpoint: {e}")
         return jsonify({"error": "An internal server error occurred on the API.", "details": str(e)}), 500
 
+@app.route('/process-instagram-posts', methods=['POST'])
+@require_api_key
+def api_process_instagram_posts():
+    start_request_time = time.time()
+    log("--- Received request to /process-instagram-posts ---")
+
+    if not request.is_json:
+        return jsonify({"error": "Request must be JSON"}), 400
+
+    data = request.get_json()
+    instagram_urls = data.get('instagram_url')
+    if not instagram_urls or not isinstance(instagram_urls, list):
+        return jsonify({"error": "'instagram_url' must be a non-empty array of URLs"}), 400
+
+    results = []
+    for idx, url in enumerate(instagram_urls):
+        log(f"--- Processing URL {idx + 1}/{len(instagram_urls)}: {url} ---")
+        result = process_instagram_post_logic(url)
+        results.append({
+            "url": url,
+            "result": result
+        })
+
+    request_duration = time.time() - start_request_time
+    log(f"--- All URLs processed in {request_duration:.2f} seconds ---")
+    return jsonify({
+        "success": True,
+        "processed_count": len(results),
+        "results": results,
+        "logs": LOGS
+    }), 200
+
+
 # -----------------------------------------
 # Main Execution Block (for local development)
 # -----------------------------------------
