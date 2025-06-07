@@ -272,7 +272,7 @@ Example JSON output:
     "Stretch out the dough on a floured surface.",
     "Spread tomato sauce evenly over the dough (visual: sauce being spread).",
     "Add cheese and your favorite toppings (visual: cheese, pepperoni, and peppers being added).",
-    "Bake in a preheated oven at 220°C until crust is golden and cheese is bubbly."
+    "Bake in a preheated oven at 220° C until crust is golden and cheese is bubbly."
   ],
   "ingredients": [
     {{"item": "Pizza dough", "quantity": "1 ball"}},
