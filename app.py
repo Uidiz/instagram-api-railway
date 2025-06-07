@@ -8,6 +8,7 @@ import yt_dlp # For downloading Instagram videos
 import google.generativeai as genai # For Gemini LLM
 import cv2 # For frame extraction
 from concurrent.futures import ThreadPoolExecutor # For potential parallel tasks
+import threading
 
 from flask import Flask, Response, request, jsonify
 from flask_cors import CORS
@@ -21,6 +22,8 @@ app.config['JSON_SORT_KEYS'] = False # Preserve order in JSON responses
 ASSEMBLYAI_API_KEY = os.environ.get("ASSEMBLYAI_API_KEY")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 RAILWAY_API_KEY = os.environ.get("RAILWAY_API_KEY") # API Key for securing this Flask API
+
+BATCH_PROCESSING_RESULTS = {}
 
 # --- Basic Configuration Validation ---
 if not ASSEMBLYAI_API_KEY:
@@ -391,6 +394,60 @@ def process_instagram_post_logic(instagram_url):
             except Exception as e:
                 log(f"Error cleaning up temporary video directory {video_download_dir}: {e}")
 
+# -------------------------------------------------
+# Background Batch Processing Function
+# -------------------------------------------------
+def process_batch_in_background(batch_id, instagram_urls):
+    """Process a batch of Instagram URLs in the background"""
+    print(f"🚀 Starting background processing for batch {batch_id} with {len(instagram_urls)} URLs")
+    
+    # Initialize batch results
+    BATCH_PROCESSING_RESULTS[batch_id] = {
+        "status": "processing",
+        "total": len(instagram_urls),
+        "completed": 0,
+        "failed": 0,
+        "results": [],
+        "start_time": time.time(),
+        "last_updated": time.time()
+    }
+    
+    try:
+        for i, url in enumerate(instagram_urls):
+            print(f"📝 Processing URL {i+1}/{len(instagram_urls)}: {url}")
+            
+            # Process individual URL
+            result = process_instagram_post_logic(url)
+            
+            # Update batch results
+            BATCH_PROCESSING_RESULTS[batch_id]["results"].append(result)
+            BATCH_PROCESSING_RESULTS[batch_id]["last_updated"] = time.time()
+            
+            if result.get("success"):
+                BATCH_PROCESSING_RESULTS[batch_id]["completed"] += 1
+                print(f"✅ Successfully processed: {url}")
+            else:
+                BATCH_PROCESSING_RESULTS[batch_id]["failed"] += 1
+                print(f"❌ Failed to process: {url}")
+            
+            # Add delay between requests to avoid rate limiting
+            if i < len(instagram_urls) - 1:
+                time.sleep(2)  # 2 second delay between requests
+        
+        # Mark batch as completed
+        BATCH_PROCESSING_RESULTS[batch_id]["status"] = "completed"
+        BATCH_PROCESSING_RESULTS[batch_id]["end_time"] = time.time()
+        duration = BATCH_PROCESSING_RESULTS[batch_id]["end_time"] - BATCH_PROCESSING_RESULTS[batch_id]["start_time"]
+        
+        print(f"🎉 Batch {batch_id} completed in {duration:.2f} seconds")
+        print(f"📊 Results: {BATCH_PROCESSING_RESULTS[batch_id]['completed']} successful, {BATCH_PROCESSING_RESULTS[batch_id]['failed']} failed")
+        
+    except Exception as e:
+        print(f"💥 Fatal error in batch {batch_id}: {e}")
+        BATCH_PROCESSING_RESULTS[batch_id]["status"] = "error"
+        BATCH_PROCESSING_RESULTS[batch_id]["error"] = str(e)
+        BATCH_PROCESSING_RESULTS[batch_id]["end_time"] = time.time()
+
 
 # -----------------------------------------
 # Flask API Endpoint Definition
@@ -465,38 +522,78 @@ def api_process_instagram_post():
         log(f"FATAL: Unhandled exception in API endpoint: {e}")
         return jsonify({"error": "An internal server error occurred on the API.", "details": str(e)}), 500
 
-@app.route('/process-instagram-posts', methods=['POST'])
+@app.route('/process-instagram-posts-batch', methods=['POST'])
 @require_api_key
-def api_process_instagram_posts():
+def api_process_instagram_posts_batch():
+    """NEW ENDPOINT: Accept array of URLs and process them in background"""
     start_request_time = time.time()
-    log("--- Received request to /process-instagram-posts ---")
+    print("--- Received request to /process-instagram-posts-batch ---")
 
     if not request.is_json:
         return jsonify({"error": "Request must be JSON"}), 400
 
     data = request.get_json()
-    instagram_urls = data.get('instagram_url')
-    if not instagram_urls or not isinstance(instagram_urls, list):
-        return jsonify({"error": "'instagram_url' must be a non-empty array of URLs"}), 400
+    instagram_urls = data.get('instagram_urls')
+    
+    if not instagram_urls or not isinstance(instagram_urls, list) or len(instagram_urls) == 0:
+        return jsonify({"error": "'instagram_urls' must be a non-empty array of URLs"}), 400
 
-    results = []
-    for idx, url in enumerate(instagram_urls):
-        log(f"--- Processing URL {idx + 1}/{len(instagram_urls)}: {url} ---")
-        time.sleep(2)
-        result = process_instagram_post_logic(url)
-        results.append({
-            "url": url,
-            "result": result
-        })
-
+    # Validate URLs
+    valid_urls = []
+    for url in instagram_urls:
+        if isinstance(url, str) and ('instagram.com' in url and ('/p/' in url or '/reel/' in url or '/tv/' in url)):
+            valid_urls.append(url)
+    
+    if not valid_urls:
+        return jsonify({"error": "No valid Instagram URLs found in the provided array"}), 400
+    
+    # Generate unique batch ID
+    batch_id = f"batch_{int(time.time())}_{os.urandom(4).hex()}"
+    
+    # Start background processing
+    thread = threading.Thread(
+        target=process_batch_in_background, 
+        args=(batch_id, valid_urls),
+        daemon=True
+    )
+    thread.start()
+    
     request_duration = time.time() - start_request_time
-    log(f"--- All URLs processed in {request_duration:.2f} seconds ---")
+    print(f"--- Batch {batch_id} queued for processing in {request_duration:.2f} seconds ---")
+    
+    # Return immediate response
     return jsonify({
         "success": True,
-        "processed_count": len(results),
-        "results": results,
-        "logs": LOGS
-    }), 200
+        "message": "Batch processing started successfully",
+        "batch_id": batch_id,
+        "total_urls": len(valid_urls),
+        "valid_urls": len(valid_urls),
+        "invalid_urls": len(instagram_urls) - len(valid_urls),
+        "status_endpoint": f"/batch-status/{batch_id}"
+    }), 202  # 202 Accepted - processing started
+
+@app.route('/batch-status/<batch_id>', methods=['GET'])
+@require_api_key
+def api_batch_status(batch_id):
+    """Get status of a batch processing job"""
+    if batch_id not in BATCH_PROCESSING_RESULTS:
+        return jsonify({"error": "Batch ID not found"}), 404
+    
+    batch_info = BATCH_PROCESSING_RESULTS[batch_id].copy()
+    
+    # Calculate progress percentage
+    if batch_info["total"] > 0:
+        batch_info["progress_percentage"] = round((batch_info["completed"] + batch_info["failed"]) / batch_info["total"] * 100, 2)
+    else:
+        batch_info["progress_percentage"] = 0
+    
+    # Calculate processing time
+    if batch_info["status"] == "completed" and "end_time" in batch_info:
+        batch_info["total_processing_time"] = round(batch_info["end_time"] - batch_info["start_time"], 2)
+    else:
+        batch_info["elapsed_time"] = round(time.time() - batch_info["start_time"], 2)
+    
+    return jsonify(batch_info), 200
 
 
 # -----------------------------------------
